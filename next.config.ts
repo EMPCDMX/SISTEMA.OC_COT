@@ -1,15 +1,17 @@
-import type { NextConfig } from 'next'
+import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {
-    serverComponentsExternalPackages: ['puppeteer-core', '@sparticuz/chromium', 'archiver', 'node-vibrant'],
-  },
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals = [...(config.externals || []), 'puppeteer-core', '@sparticuz/chromium']
-    }
-    return config
-  },
-}
+  // En Next 16 ya no se usa serverComponentsExternalPackages aquí.
+  // Si necesitas permitir paquetes en Server Components, se maneja
+  // con configuración moderna o moviendo esa lógica al runtime.
 
-export default nextConfig
+  // Mantén esto si usas imágenes remotas (ajústalo si hace falta).
+  images: {
+    remotePatterns: [
+      // ejemplo para Supabase storage público
+      // { protocol: "https", hostname: "**.supabase.co" }
+    ],
+  },
+};
+
+export default nextConfig;
