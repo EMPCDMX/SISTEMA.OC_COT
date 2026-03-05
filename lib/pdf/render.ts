@@ -196,11 +196,13 @@ export async function renderPdfFromHtml(
 
   let executablePath: string
   let args: string[]
+  let headless: boolean = true
 
   if (process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL) {
     const chromium = (await import('@sparticuz/chromium')).default
     executablePath = await chromium.executablePath()
     args = chromium.args
+    headless = chromium.headless
   } else {
     // Desarrollo local: buscar chrome/chromium instalado
     executablePath = findLocalChrome()
@@ -210,7 +212,7 @@ export async function renderPdfFromHtml(
   const browser = await puppeteer.launch({
     executablePath,
     args,
-    headless: true,
+    headless,
   })
 
   try {
