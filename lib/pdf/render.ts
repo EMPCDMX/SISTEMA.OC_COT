@@ -1,7 +1,5 @@
 import fs from 'fs'
 import path from 'path'
-import chromium from '@sparticuz/chromium'
-import puppeteer from 'puppeteer-core'
 import type { ThemeTokens, EmpresaBancaria } from '@/lib/supabase'
 import { formatDateES } from '@/lib/dates/businessDays'
 import { formatCurrency } from '@/lib/utils/totales'
@@ -186,16 +184,27 @@ export function buildHtml(model: RenderModel): string {
 
 /**
  * Convierte HTML a PDF Buffer usando puppeteer-core + @sparticuz/chromium.
- * En Vercel usa el binario serverless de chromium.
- * En local requiere Chrome/Chromium instalado o PUPPETEER_EXECUTABLE_PATH.
+ *
+ * Los imports son DINÁMICOS (dentro de la función) para que webpack no bundle
+ * estos módulos nativos en el server chunk general. Solo se cargan cuando
+ * este endpoint es invocado explícitamente.
+ *
+ * En Vercel: usa @sparticuz/chromium (binario serverless, sin libnss3.so).
+ * En local:  usa PUPPETEER_EXECUTABLE_PATH o Chrome del sistema.
  */
 export async function renderPdfFromHtml(html: string): Promise<Buffer> {
   const isVercel = !!process.env.VERCEL
 
+  // Imports dinámicos: se resuelven solo cuando se llama esta función
+  const puppeteer = (await import('puppeteer-core')).default
+  const chromium  = (await import('@sparticuz/chromium')).default
+
   const browser = await puppeteer.launch({
     args:           isVercel ? chromium.args : ['--no-sandbox', '--disable-setuid-sandbox'],
-    executablePath: isVercel ? await chromium.executablePath() : (process.env.PUPPETEER_EXECUTABLE_PATH ?? undefined),
-    headless:       isVercel ? chromium.headless : true,
+    executablePath: isVercel
+      ? await chromium.executablePath()
+      : (process.env.PUPPETEER_EXECUTABLE_PATH ?? undefined),
+    headless: isVercel ? chromium.headless : true,
   })
 
   try {
