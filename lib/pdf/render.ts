@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import chromium from '@sparticuz/chromium'
+import puppeteer from 'puppeteer-core'
 import type { ThemeTokens, EmpresaBancaria } from '@/lib/supabase'
 import { formatDateES } from '@/lib/dates/businessDays'
 import { formatCurrency } from '@/lib/utils/totales'
@@ -183,36 +185,17 @@ export function buildHtml(model: RenderModel): string {
 // ── Puppeteer renderer ────────────────────────────────────────────────────
 
 /**
- * Convierte HTML a PDF Buffer usando puppeteer + chromium serverless.
- * En entornos serverless (Vercel) usa @sparticuz/chromium.
- * En local usa la instalación de chromium del sistema si existe.
+ * Convierte HTML a PDF Buffer usando puppeteer-core + @sparticuz/chromium.
+ * En Vercel usa el binario serverless de chromium.
+ * En local requiere Chrome/Chromium instalado o PUPPETEER_EXECUTABLE_PATH.
  */
-export async function renderPdfFromHtml(
-  html: string,
-  options: { landscape?: boolean } = {},
-): Promise<Buffer> {
-  // Importación dinámica para evitar que webpack lo bundle en client
-  const puppeteer = (await import('puppeteer-core')).default
-
-  let executablePath: string
-  let args: string[]
-  let headless: boolean = true
-
-  if (process.env.AWS_LAMBDA_FUNCTION_NAME || process.env.VERCEL) {
-    const chromium = (await import('@sparticuz/chromium')).default
-    executablePath = await chromium.executablePath()
-    args = chromium.args
-    headless = chromium.headless
-  } else {
-    // Desarrollo local: buscar chrome/chromium instalado
-    executablePath = findLocalChrome()
-    args = ['--no-sandbox', '--disable-setuid-sandbox']
-  }
+export async function renderPdfFromHtml(html: string): Promise<Buffer> {
+  const isVercel = !!process.env.VERCEL
 
   const browser = await puppeteer.launch({
-    executablePath,
-    args,
-    headless,
+    args:           isVercel ? chromium.args : ['--no-sandbox', '--disable-setuid-sandbox'],
+    executablePath: isVercel ? await chromium.executablePath() : (process.env.PUPPETEER_EXECUTABLE_PATH ?? undefined),
+    headless:       isVercel ? chromium.headless : true,
   })
 
   try {
@@ -220,10 +203,9 @@ export async function renderPdfFromHtml(
     await page.setContent(html, { waitUntil: 'networkidle0' })
 
     const pdf = await page.pdf({
-      format: 'A4',
-      landscape: options.landscape ?? false,
+      format:          'A4',
       printBackground: true,
-      margin: { top: '15mm', bottom: '15mm', left: '12mm', right: '12mm' },
+      margin: { top: '12mm', right: '12mm', bottom: '12mm', left: '12mm' },
     })
 
     return Buffer.from(pdf)
@@ -247,22 +229,3 @@ function formatNum(n: number): string {
   return new Intl.NumberFormat('es-MX', { maximumFractionDigits: 4 }).format(n)
 }
 
-function findLocalChrome(): string {
-  const candidates = [
-    '/usr/bin/google-chrome',
-    '/usr/bin/chromium-browser',
-    '/usr/bin/chromium',
-    'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  ]
-  for (const c of candidates) {
-    try {
-      fs.accessSync(c)
-      return c
-    } catch { /* not found */ }
-  }
-  throw new Error(
-    'No se encontró Chrome/Chromium. Instálalo o configura PUPPETEER_EXECUTABLE_PATH.',
-  )
-}
