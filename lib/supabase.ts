@@ -88,6 +88,7 @@ export type SolicitudFactura = {
   iva_tasa: number
   estatus: string
   source_file_path: string | null
+  import_job_id: string | null
   created_at: string
 }
 
