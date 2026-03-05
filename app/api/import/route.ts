@@ -9,17 +9,12 @@ export const maxDuration = 60
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData()
-    const file     = formData.get('file') as File | null
-    const empresaId= formData.get('empresa_emisora_id') as string | null
+    const file             = formData.get('file') as File | null
+    const empresaIdFallback= formData.get('empresa_emisora_id') as string | null
 
     if (!file) return NextResponse.json({ error: 'Archivo requerido' }, { status: 400 })
-    if (!empresaId) return NextResponse.json({ error: 'empresa_emisora_id requerido' }, { status: 400 })
 
     const db = getAdminClient()
-
-    // Verificar empresa existe
-    const { data: empresa } = await db.from('empresas').select('id').eq('id', empresaId).single()
-    if (!empresa) return NextResponse.json({ error: 'Empresa emisora no encontrada' }, { status: 404 })
 
     // Leer buffer del archivo
     const arrayBuffer = await file.arrayBuffer()
@@ -42,12 +37,62 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    // Agrupar por folio
+    // Agrupar por (empresa_emisora, folio)
     const solicitudes = agruparSolicitudes(rows)
 
-    const results: { folio: string; status: 'created' | 'skipped' | 'error'; reason?: string }[] = []
+    // Recolectar nombres únicos de empresas que vienen del Excel
+    const nombresEmpresa = Array.from(
+      new Set(solicitudes.map(s => s.empresa_emisora).filter(Boolean))
+    )
+
+    // Construir mapa nombre_comercial → id
+    const empresaIdMap: Record<string, string> = {}
+
+    if (nombresEmpresa.length > 0) {
+      const { data: empresasDB } = await db
+        .from('empresas')
+        .select('id, nombre_comercial')
+        .in('nombre_comercial', nombresEmpresa)
+
+      if (empresasDB) {
+        for (const e of empresasDB) {
+          empresaIdMap[e.nombre_comercial] = e.id
+        }
+      }
+    }
+
+    // Verificar fallback si se proporcionó empresa_emisora_id
+    if (empresaIdFallback) {
+      const { data: empresaFallback } = await db
+        .from('empresas')
+        .select('id')
+        .eq('id', empresaIdFallback)
+        .single()
+      if (!empresaFallback) {
+        return NextResponse.json({ error: 'empresa_emisora_id de fallback no encontrada' }, { status: 404 })
+      }
+    }
+
+    const results: { folio: string; empresa: string; status: 'created' | 'skipped' | 'error'; reason?: string }[] = []
 
     for (const sol of solicitudes) {
+      // Resolver empresa: columna del Excel primero, luego fallback del form
+      const empresaId = (sol.empresa_emisora && empresaIdMap[sol.empresa_emisora])
+        ? empresaIdMap[sol.empresa_emisora]
+        : (empresaIdFallback ?? null)
+
+      if (!empresaId) {
+        results.push({
+          folio:   sol.folio_factura,
+          empresa: sol.empresa_emisora || '(sin empresa)',
+          status:  'error',
+          reason:  sol.empresa_emisora
+            ? `Empresa "${sol.empresa_emisora}" no encontrada en el catálogo`
+            : 'No se proporcionó empresa_emisora en el Excel ni como parámetro del form',
+        })
+        continue
+      }
+
       try {
         // Upsert cliente
         const clienteNorm = normalizeForCatalog(sol.cliente)
@@ -77,15 +122,16 @@ export async function POST(req: NextRequest) {
           if (provRow) proveedorIdMap[prov.norm] = provRow.id
         }
 
-        // Verificar si folio ya existe
+        // Verificar si (empresa_emisora_id, folio_factura) ya existe
         const { data: existing } = await db
           .from('solicitudes_factura')
           .select('id')
           .eq('folio_factura', sol.folio_factura)
-          .single()
+          .eq('empresa_emisora_id', empresaId)
+          .maybeSingle()
 
         if (existing) {
-          results.push({ folio: sol.folio_factura, status: 'skipped', reason: 'Folio ya existe' })
+          results.push({ folio: sol.folio_factura, empresa: sol.empresa_emisora, status: 'skipped', reason: 'Folio ya existe para esta empresa' })
           continue
         }
 
@@ -105,7 +151,7 @@ export async function POST(req: NextRequest) {
           .single()
 
         if (solError || !nuevaSol) {
-          results.push({ folio: sol.folio_factura, status: 'error', reason: solError?.message ?? 'Error insertando solicitud' })
+          results.push({ folio: sol.folio_factura, empresa: sol.empresa_emisora, status: 'error', reason: solError?.message ?? 'Error insertando solicitud' })
           continue
         }
 
@@ -122,15 +168,15 @@ export async function POST(req: NextRequest) {
 
         const { error: partidasError } = await db.from('solicitud_partidas').insert(partidas)
         if (partidasError) {
-          results.push({ folio: sol.folio_factura, status: 'error', reason: partidasError.message })
+          results.push({ folio: sol.folio_factura, empresa: sol.empresa_emisora, status: 'error', reason: partidasError.message })
           // Rollback manual de la solicitud
           await db.from('solicitudes_factura').delete().eq('id', nuevaSol.id)
           continue
         }
 
-        results.push({ folio: sol.folio_factura, status: 'created' })
+        results.push({ folio: sol.folio_factura, empresa: sol.empresa_emisora, status: 'created' })
       } catch (err) {
-        results.push({ folio: sol.folio_factura, status: 'error', reason: String(err) })
+        results.push({ folio: sol.folio_factura, empresa: sol.empresa_emisora, status: 'error', reason: String(err) })
       }
     }
 
