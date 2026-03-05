@@ -16,6 +16,9 @@ export async function POST(req: NextRequest) {
 
     const db = getAdminClient()
 
+    // Identificador único para este lote de importación
+    const importJobId = crypto.randomUUID()
+
     // Leer buffer del archivo
     const arrayBuffer = await file.arrayBuffer()
     const buffer      = Buffer.from(arrayBuffer)
@@ -146,6 +149,7 @@ export async function POST(req: NextRequest) {
             empresa_emisora_id:  empresaId,
             iva_tasa:            sol.iva_tasa,
             source_file_path:    storePath,
+            import_job_id:       importJobId,
           })
           .select('id')
           .single()
@@ -188,6 +192,7 @@ export async function POST(req: NextRequest) {
       created,
       skipped,
       failed,
+      import_job_id: importJobId,
       results,
       parseErrors,
       message: `Importación completada: ${created} creadas, ${skipped} omitidas, ${failed} errores`,
