@@ -7,6 +7,7 @@ const COL_ALIASES: Record<string, string[]> = {
   folio_factura:    ['folio', 'folio solicitud', 'folio de fac', 'folio de factura', 'num solicitud'],
   fecha_solicitud:  ['fecha', 'fecha solicitud', 'fecha de solicitud', 'fecha de fac'],
   cliente:          ['cliente', 'nombre cliente'],
+  empresa_emisora:  ['empresa', 'empresa emisora', 'emisor', 'razon social emisora', 'razón social emisora', 'empresa_emisora'],
   proveedor:        ['proveedor', 'nombre proveedor', 'vendor'],
   concepto:         ['concepto', 'descripcion', 'descripción', 'detalle', 'item'],
   cantidad:         ['cantidad', 'qty', 'cant', 'piezas'],
@@ -20,6 +21,7 @@ export type RawRow = {
   folio_factura:   string
   fecha_solicitud: string    // ISO YYYY-MM-DD
   cliente:         string
+  empresa_emisora: string    // nombre_comercial de la empresa; puede venir vacío
   proveedor:       string
   concepto:        string
   cantidad:        number
@@ -95,10 +97,11 @@ export function parseExcelSolicitudes(
       return val !== null && val !== undefined ? String(val).trim() : ''
     }
 
-    const folio    = get('folio_factura')
-    const fechaRaw = get('fecha_solicitud')
-    const cliente  = get('cliente')
-    const proveedor= get('proveedor')
+    const folio         = get('folio_factura')
+    const fechaRaw      = get('fecha_solicitud')
+    const cliente       = get('cliente')
+    const empresaEmisora= get('empresa_emisora')
+    const proveedor     = get('proveedor')
     const concepto = get('concepto')
     const cantStr  = get('cantidad')
     const precioStr= get('precio_unitario')
@@ -167,6 +170,7 @@ export function parseExcelSolicitudes(
       folio_factura:   folio,
       fecha_solicitud: fecha,
       cliente:         cliente,
+      empresa_emisora: empresaEmisora,
       proveedor:       proveedor,
       concepto:        concepto,
       cantidad:        cantidad,
@@ -182,11 +186,12 @@ export function parseExcelSolicitudes(
 // ── Agrupación por folio ──────────────────────────────────────────────────
 
 export type SolicitudAgrupada = {
-  folio_factura:   string
-  fecha_solicitud: string
-  cliente:         string
-  cliente_normalizado: string
-  iva_tasa:        number
+  folio_factura:        string
+  fecha_solicitud:      string
+  cliente:              string
+  cliente_normalizado:  string
+  empresa_emisora:      string   // nombre_comercial; vacío si no viene en el Excel
+  iva_tasa:             number
   partidas: {
     proveedor:              string
     proveedor_normalizado:  string
@@ -201,7 +206,8 @@ export function agruparSolicitudes(rows: RawRow[]): SolicitudAgrupada[] {
   const map = new Map<string, SolicitudAgrupada>()
 
   rows.forEach((row) => {
-    const key = row.folio_factura
+    // Clave compuesta: empresa (puede estar vacía) + folio
+    const key = `${row.empresa_emisora}||${row.folio_factura}`
 
     if (!map.has(key)) {
       map.set(key, {
@@ -209,6 +215,7 @@ export function agruparSolicitudes(rows: RawRow[]): SolicitudAgrupada[] {
         fecha_solicitud:      row.fecha_solicitud,
         cliente:              row.cliente,
         cliente_normalizado:  normalizeForCatalog(row.cliente),
+        empresa_emisora:      row.empresa_emisora,
         iva_tasa:             row.iva_tasa,
         partidas:             [],
       })
